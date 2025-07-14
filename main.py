@@ -11,24 +11,49 @@ import pyarrow.parquet as pq
 
 storage_client = storage.Client()
 
+# ------------- CONFIG -------------
+SENSOR_NAME = "iis3dwb_acc"
+REQUIRED_FILES = {
+    "acquisition_info.json",
+    "device_config.json",
+    f"{SENSOR_NAME}.dat",
+}
+
+def all_required_present(blob_iter):
+    """Ritorna True se nei blob c’è ogni file richiesto."""
+    names = {os.path.basename(b.name).lower() for b in blob_iter}
+    return REQUIRED_FILES.issubset(names), names
+
+
 @cloud_event
 def process_dat_to_parquet(cloud_event):
     data = cloud_event.data
     bucket_name = data["bucket"]
     object_name = data["name"]
 
-    if not object_name.endswith(".dat"):
+    # ❌ Non filtriamo più sul solo ".dat": vogliamo controllare a ogni evento
+    prefix = os.path.dirname(object_name)         # dati_raw/XYZ_20250711_...
+    if not prefix:                                # ignora se il file è nella root
         return
 
-    prefix = os.path.dirname(object_name)
-    tmpdir = tempfile.mkdtemp()
-    local_folder = os.path.join(tmpdir, prefix.replace("/", "_"))
-    os.makedirs(local_folder, exist_ok=True)
-
     bucket = storage_client.bucket(bucket_name)
-    for blob in storage_client.list_blobs(bucket_name, prefix=prefix + "/"):
+    blobs = list(storage_client.list_blobs(bucket_name, prefix=prefix + "/"))
+
+    ready, present = all_required_present(blobs)
+    if not ready:
+        missing = REQUIRED_FILES - present
+        print(f"[INFO] Cartella {prefix}: mancano {missing}, riproverò al prossimo evento")
+        return                                      # uscita “soft” – la funzione verrà richiamata
+
+    # ✅  ci sono tutti i file: procedi
+    tmpdir = tempfile.mkdtemp()
+    local_folder = os.path.join(tmpdir, "hsd_folder")
+    os.makedirs(local_folder, exist_ok=True)
+    for blob in blobs:
         dest = os.path.join(local_folder, os.path.basename(blob.name))
         blob.download_to_filename(dest)
+
+    print("[DEBUG] File scaricati:", os.listdir(local_folder))
 
     # ---------------- HSDatalog ----------------
     hsd = HSDatalog()
