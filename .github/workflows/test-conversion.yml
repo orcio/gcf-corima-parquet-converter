@@ -28,9 +28,10 @@ jobs:
           export_default_credentials: true
 
       # 3) Debug (facoltativo): controlla che BUCKET_NAME sia corretto
-      - name: Echo bucket
-        run: echo "Bucket: gs://${BUCKET_NAME}"
-
+      - name: Debug ENV
+        run: |
+            echo "BUCKET_NAME is: '$BUCKET_NAME'"
+            
       # 4) Copia i raw sample per triggerare la Function
       - name: Upload test files
         id: upload
