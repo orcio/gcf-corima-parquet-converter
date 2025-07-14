@@ -11,7 +11,7 @@ on:
 #   - GCS_BUCKET        → nome del bucket (solo nome, senza gs://)
 
 env:
-  REGION: eu
+  REGION: europe-west1
 
 jobs:
 # -------------------------------------------------------------------
