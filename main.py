@@ -92,18 +92,17 @@ def process_dat_to_parquet(cloud_event):
     # 3) scrivi Parquet con delta encoding abilitato
     table = pa.Table.from_pandas(df)
     # 2. Mappa “colonna → encoding”
-    encodings = {"Time": "DELTA_BINARY_PACKED"}   # solo per Time
 
     # 3. Scrivi il Parquet
     parquet_out = os.path.join(local_folder, "iis3dwb_acc_enriched.parquet")
-    with pq.ParquetWriter(
-            parquet_out,
-            table.schema,
-            compression="SNAPPY",
-            data_page_version="2.0",
-            column_encoding=encodings) as writer:
-        writer.write_table(table)
-
+    enc = {"Time": "DELTA_BINARY_PACKED"}
+    pq.write_table(
+        table, parquet_out,
+        compression="SNAPPY",
+        data_page_version="2.0",
+        column_encoding=enc,
+        use_dictionary=["alias", "Date"]   # lista di colonne da tenere in dizionario
+    )
 
     timestamp_str = dt_start.strftime("%Y%m%d_%H%M%S")
 
