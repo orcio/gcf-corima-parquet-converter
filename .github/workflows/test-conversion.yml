@@ -1,47 +1,101 @@
-name: Test Cloud Function Conversion
+name: Deploy & Test Cloud Function Conversion
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
 
-jobs:
-  test-conversion:
-    runs-on: ubuntu-latest
+# ▸ Secrets richiesti:
+#   - GCP_PROJECT       → ID del progetto GCP
+#   - GCP_SA_KEY        → chiave JSON del service-account
+#   - GCS_BUCKET        → nome del bucket (solo nome, senza gs://)
 
+env:
+  REGION: europe-west1
+
+jobs:
+# -------------------------------------------------------------------
+# 1) DEPLOY (o update) DELLA FUNZIONE
+# -------------------------------------------------------------------
+  deploy-function:
+    runs-on: ubuntu-latest
     env:
-      BUCKET_NAME: ${{ secrets.GCS_BUCKET }}   # assicurati che esista nei secrets
+      BUCKET_NAME: ${{ secrets.GCS_BUCKET }}
 
     steps:
-      # 1) Clona il repo
       - uses: actions/checkout@v3
 
-      # 2) Autenticati a Google Cloud
       - name: Auth to GCP
         uses: google-github-actions/auth@v1
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}   # chiave JSON del service account
-          export_default_credentials: true              # rende le ADC disponibili ai passi successivi
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
 
-      # 3) Installa gcloud CLI
       - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.GCP_PROJECT }}
+          install_components: 'beta'   # per funzioni 2ª gen, togli se usi gen1
+
+      # ▸ DEPLOY / UPDATE
+      - name: Deploy Cloud Function
+        run: |
+          gcloud functions deploy process_dat_to_parquet \
+            --quiet \
+            --runtime python310 \
+            --entry-point process_dat_to_parquet \
+            --trigger-event google.storage.object.finalize \
+            --trigger-resource ${BUCKET_NAME} \
+            --memory 512MB \
+            --region ${REGION} \
+            --source .               # cartella radice del repo
+
+      # ▸ Attendi che la funzione sia ACTIVE
+      - name: Wait until function is ACTIVE
+        run: |
+          for i in {1..20}; do
+            STATUS=$(gcloud functions describe process_dat_to_parquet \
+                       --region ${REGION} --format='value(status)')
+            echo "Status: $STATUS"
+            if [[ "$STATUS" == "ACTIVE" ]]; then exit 0; fi
+            sleep 15
+          done
+          echo "Function not ACTIVE in time"; exit 1
+
+# -------------------------------------------------------------------
+# 2) TEST DI CONVERSIONE (parte solo se deploy ok)
+# -------------------------------------------------------------------
+  test-conversion:
+    needs: deploy-function          # <-- dipende dal job precedente
+    runs-on: ubuntu-latest
+    env:
+      BUCKET_NAME: ${{ secrets.GCS_BUCKET }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Setup gcloud / gsutil
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: ${{ secrets.GCP_PROJECT }}
           install_components: 'gsutil'
 
-      # 4) Verifica che il bucket esista
       - name: Verify bucket exists
         run: gsutil ls -b gs://${BUCKET_NAME}
 
-      # timestamp univoco per cartella test
+      # ▸ 1. Copia sample per triggerare la funzione
       - name: Upload test files
         id: upload
         run: |
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
-          TEST_PREFIX="dati_test/test_${TIMESTAMP}"
+          TEST_PREFIX="dati_raw/test_${TIMESTAMP}"
 
-          # cartella sorgente già presente (senza duplicare il nome bucket!)
           SAMPLE_PREFIX="dati_raw/LAF1_20250711_16_22_17"
 
           gsutil -m cp "gs://${BUCKET_NAME}/${SAMPLE_PREFIX}/*.dat" \
@@ -49,35 +103,30 @@ jobs:
           gsutil -m cp "gs://${BUCKET_NAME}/${SAMPLE_PREFIX}/*.json" \
                         "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
 
-          echo "TEST_PREFIX=${TEST_PREFIX}" >> $GITHUB_ENV
-
-      - name: Wait for output Parquet
+      # ▸ 2. Attesa output Parquet
+      - name: Wait for Parquet
         run: |
-          SAMPLE_FOLDER=${SAMPLE_PREFIX##*/}      # LAF1_20250711_16_22_17
-          alias=${SAMPLE_FOLDER%%_*}              # LAF1
-          yyyymmdd=${SAMPLE_FOLDER#*_}
-          yyyymmdd=${yyyymmdd%%_*}                # 20250711
-          dt="${yyyymmdd:0:4}/${yyyymmdd:4:2}/${yyyymmdd:6:2}"
+          alias="LAF1"
+          dt="2025/07/11"
           DEST_PATH="${alias}/${dt}/iis3dwb_acc.parquet"
-          echo "DEST_PATH=${DEST_PATH}" >> $GITHUB_ENV
 
           for i in {1..30}; do
             if gsutil -q stat "gs://${BUCKET_NAME}/${DEST_PATH}"; then
-              echo "Found gs://${BUCKET_NAME}/${DEST_PATH}"
+              echo "DEST_PATH=${DEST_PATH}" >> $GITHUB_ENV
               exit 0
             fi
             sleep 10
           done
-          echo "Parquet not found"
-          exit 1
+          echo "Parquet not found"; exit 1
 
+      # ▸ 3. Validazione Parquet
       - name: Validate Parquet
         run: |
           gsutil cp "gs://${BUCKET_NAME}/${DEST_PATH}" output.parquet
-          python - <<EOF
-            import pandas as pd, sys, os
+          python - <<'PY'
+            import pandas as pd, sys
             df = pd.read_parquet("output.parquet")
-            assert "alias" in df.columns, "missing alias"
-            assert df["Time"].dtype == "int64", "Time not int64"
-            print("✅ parquet ok, rows:", len(df))
-            EOF
+            assert 'alias' in df.columns, "alias missing"
+            assert df['Time'].dtype == 'int64', "Time not int64 ns"
+            print("✅ rows:", len(df))
+            PY
