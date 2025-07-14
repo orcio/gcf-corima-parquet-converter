@@ -104,11 +104,14 @@ def process_dat_to_parquet(cloud_event):
             column_encoding=encodings) as writer:
         writer.write_table(table)
 
+
+    timestamp_str = dt_start.strftime("%Y%m%d_%H%M%S")
+
     # 4) path di destinazione basato su dt_start
     dest_path = (
         f"{alias}/"
         f"{dt_start.year:04d}/{dt_start.month:02d}/{dt_start.day:02d}/"
-        "iis3dwb_acc.parquet"
+        f"iis3dwb_acc_{timestamp_str}.parquet"
     )
 
     dest_blob = bucket.blob(dest_path)
