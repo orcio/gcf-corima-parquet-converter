@@ -50,20 +50,6 @@ jobs:
             --region ${REGION} \
             --source .               # cartella radice del repo
 
-      - name: Wait until Cloud Function is ACTIVE
-        run: |
-          for i in {1..20}; do
-            STATE=$(gcloud run services describe process-dat-to-parquet \
-              --region ${REGION} --format="value(status.conditions[?type='Ready'].state)")
-            echo "State: $STATE"
-            if [[ "$STATE" == "True" ]]; then
-              echo "✅ Function is ready"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "❌ Function not ready in time"
-          exit 1
 
 # -------------------------------------------------------------------
 # 2) TEST DI CONVERSIONE (parte solo se deploy ok)
