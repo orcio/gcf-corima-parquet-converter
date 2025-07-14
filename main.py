@@ -32,6 +32,9 @@ def process_dat_to_parquet(cloud_event):
 
     # ---------------- HSDatalog ----------------
     hsd = HSDatalog()
+    print(f"[DEBUG] acquisition_folder contents:")
+    print(os.listdir(local_folder))
+
     hsd_instance = hsd.create_hsd(acquisition_folder=local_folder)
     acq_info = HSDatalog.get_acquisition_info(hsd_instance)
 
