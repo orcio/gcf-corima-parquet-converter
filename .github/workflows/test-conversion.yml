@@ -97,10 +97,15 @@ jobs:
         run: |
           alias="LAF1"
           dt="2025/07/11"
-          DEST_PATH="${alias}/${dt}/iis3dwb_acc.parquet"
+          DEST_DIR="${alias}/${dt}"      # cartella dove compariranno i file
 
           for i in {1..30}; do
-            if gsutil -q stat "gs://${BUCKET_NAME}/${DEST_PATH}"; then
+            # cerca il primo parquet che comincia con iis3dwb_acc_
+            FILE=$(gsutil ls "gs://${BUCKET_NAME}/${DEST_DIR}/iis3dwb_acc_*.parquet" 2>/dev/null | head -n 1)
+            if [[ -n "$FILE" ]]; then
+              echo "Found $FILE"
+              # esporta solo il path relativo per lo step successivo
+              DEST_PATH=${FILE#gs://${BUCKET_NAME}/}
               echo "DEST_PATH=${DEST_PATH}" >> $GITHUB_ENV
               exit 0
             fi
