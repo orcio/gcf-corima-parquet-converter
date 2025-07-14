@@ -46,7 +46,7 @@ jobs:
             --entry-point process_dat_to_parquet \
             --trigger-event google.storage.object.finalize \
             --trigger-resource ${BUCKET_NAME} \
-            --memory 512MB \
+            --memory 1024MB \
             --region ${REGION} \
             --source .               # cartella radice del repo
 
