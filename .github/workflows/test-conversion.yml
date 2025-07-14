@@ -5,20 +5,16 @@ on:
   push:
     branches: [ main ]
 
-env:
-  # Qui metti solo il nome del bucket, es. "mio-bucket"
-  BUCKET_NAME: ${{ secrets.GCS_BUCKET }}
-
 jobs:
   test-conversion:
     runs-on: ubuntu-latest
+    env:                           # <-- secrets OK qui
+      BUCKET_NAME: ${{ secrets.GCS_BUCKET }}
 
     steps:
-      # 1) Checkout del codice
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # 2) Setup SDK e autenticazione
       - name: Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
@@ -26,68 +22,53 @@ jobs:
           service_account_key: ${{ secrets.GCP_SA_KEY }}
           export_default_credentials: true
 
-      # 3) Verifica bucket
-      - name: Validate BUCKET_NAME and access
-        run: |
-          echo "🔍 Checking BUCKET_NAME: '$BUCKET_NAME'"
-          if [ -z "$BUCKET_NAME" ]; then
-            echo "❌ Error: BUCKET_NAME is empty. Set secret GCS_BUCKET to your bucket name."
-            exit 1
-          fi
-          # Prova a listare il bucket
-          if ! gsutil ls gs://$BUCKET_NAME/; then
-            echo "❌ Error: gs://$BUCKET_NAME does not exist or access denied."
-            exit 1
-          fi
-          echo "✅ Bucket OK"
+      - name: Verify bucket exists
+        run: gsutil ls -b gs://${BUCKET_NAME}
 
-      # 4) Copia i file di test per triggerare la Function
+      # timestamp univoco per cartella test
       - name: Upload test files
         id: upload
         run: |
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
           TEST_PREFIX="dati_raw/test_${TIMESTAMP}"
+
+          # cartella sorgente già presente (senza duplicare il nome bucket!)
           SAMPLE_PREFIX="dati_raw/corima-data/LAF1_20250711_16_22_17"
 
           gsutil -m cp "gs://${BUCKET_NAME}/${SAMPLE_PREFIX}/*.dat" \
-                    "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
+                        "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
           gsutil -m cp "gs://${BUCKET_NAME}/${SAMPLE_PREFIX}/*.json" \
-                    "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
+                        "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
 
           echo "TEST_PREFIX=${TEST_PREFIX}" >> $GITHUB_ENV
 
-      # 5) Attendi il Parquet nel path alias/YYYY/MM/DD/iis3dwb_acc.parquet
       - name: Wait for output Parquet
-        id: wait
         run: |
-          SAMPLE_FOLDER=${SAMPLE_PREFIX##*/}
-          alias=${SAMPLE_FOLDER%%_*}
-          date_part=${SAMPLE_FOLDER#*_}
-          yyyymmdd=${date_part%%_*}
+          SAMPLE_FOLDER=${SAMPLE_PREFIX##*/}      # LAF1_20250711_16_22_17
+          alias=${SAMPLE_FOLDER%%_*}              # LAF1
+          yyyymmdd=${SAMPLE_FOLDER#*_}
+          yyyymmdd=${yyyymmdd%%_*}                # 20250711
           dt="${yyyymmdd:0:4}/${yyyymmdd:4:2}/${yyyymmdd:6:2}"
-
           DEST_PATH="${alias}/${dt}/iis3dwb_acc.parquet"
           echo "DEST_PATH=${DEST_PATH}" >> $GITHUB_ENV
 
           for i in {1..30}; do
             if gsutil -q stat "gs://${BUCKET_NAME}/${DEST_PATH}"; then
-              echo "✅ Found gs://${BUCKET_NAME}/${DEST_PATH}"
+              echo "Found gs://${BUCKET_NAME}/${DEST_PATH}"
               exit 0
             fi
             sleep 10
           done
-
-          echo "❌ Timeout: output Parquet non trovato"
+          echo "Parquet not found"
           exit 1
 
-      # 6) Scarica e verifica il Parquet
       - name: Validate Parquet
         run: |
           gsutil cp "gs://${BUCKET_NAME}/${DEST_PATH}" output.parquet
-          python3 - <<EOF
-            import pandas as pd
+          python - <<EOF
+            import pandas as pd, sys, os
             df = pd.read_parquet("output.parquet")
-            assert "alias" in df.columns, "Missing 'alias'"
-            assert df["Time"].dtype == "int64", "Time must be int64"
-            print("✅ Parquet OK:", df.head())
+            assert "alias" in df.columns, "missing alias"
+            assert df["Time"].dtype == "int64", "Time not int64"
+            print("✅ parquet ok, rows:", len(df))
             EOF
