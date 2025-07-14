@@ -109,6 +109,9 @@ jobs:
           echo "Parquet not found"; exit 1
 
       # ▸ 3. Validazione Parquet
+      - name: Install pandas & pyarrow
+        run: pip install --quiet pandas pyarrow
+       
       - name: Validate Parquet
         run: |
           gsutil cp "gs://${BUCKET_NAME}/${DEST_PATH}" output.parquet
