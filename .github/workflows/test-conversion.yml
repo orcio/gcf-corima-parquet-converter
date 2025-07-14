@@ -39,10 +39,10 @@ jobs:
         id: upload
         run: |
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
-          TEST_PREFIX="dati_raw/test_${TIMESTAMP}"
+          TEST_PREFIX="dati_test/test_${TIMESTAMP}"
 
           # cartella sorgente già presente (senza duplicare il nome bucket!)
-          SAMPLE_PREFIX="dati_raw/corima-data/LAF1_20250711_16_22_17"
+          SAMPLE_PREFIX="dati_raw/LAF1_20250711_16_22_17"
 
           gsutil -m cp "gs://${BUCKET_NAME}/${SAMPLE_PREFIX}/*.dat" \
                         "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
