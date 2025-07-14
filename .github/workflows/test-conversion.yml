@@ -112,10 +112,4 @@ jobs:
       - name: Validate Parquet
         run: |
           gsutil cp "gs://${BUCKET_NAME}/${DEST_PATH}" output.parquet
-          python - <<'PY'
-            import pandas as pd, sys
-            df = pd.read_parquet("output.parquet")
-            assert 'alias' in df.columns, "alias missing"
-            assert df['Time'].dtype == 'int64', "Time not int64 ns"
-            print("✅ rows:", len(df))
-            PY
+          python -c "import pandas as pd, sys, pyarrow.parquet as pq; df = pd.read_parquet('output.parquet'); assert 'alias' in df.columns; assert df['Time'].dtype == 'int64'; print('✅ rows:', len(df))"
