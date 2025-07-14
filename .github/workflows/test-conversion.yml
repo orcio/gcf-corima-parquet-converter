@@ -8,20 +8,29 @@ on:
 jobs:
   test-conversion:
     runs-on: ubuntu-latest
-    env:                           # <-- secrets OK qui
-      BUCKET_NAME: ${{ secrets.GCS_BUCKET }}
+
+    env:
+      BUCKET_NAME: ${{ secrets.GCS_BUCKET }}   # assicurati che esista nei secrets
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      # 1) Clona il repo
+      - uses: actions/checkout@v3
 
-      - name: Setup Google Cloud SDK
+      # 2) Autenticati a Google Cloud
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}   # chiave JSON del service account
+          export_default_credentials: true              # rende le ADC disponibili ai passi successivi
+
+      # 3) Installa gcloud CLI
+      - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: ${{ secrets.GCP_PROJECT }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
+          install_components: 'gsutil'
 
+      # 4) Verifica che il bucket esista
       - name: Verify bucket exists
         run: gsutil ls -b gs://${BUCKET_NAME}
 
