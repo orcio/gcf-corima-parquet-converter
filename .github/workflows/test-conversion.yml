@@ -26,6 +26,11 @@ jobs:
           project_id: ${{ secrets.GCP_PROJECT }}
           service_account_key: ${{ secrets.GCP_SA_KEY }}
           export_default_credentials: true
+    
+      - name: Debug ENV
+        run: |
+            echo "BUCKET_NAME is: '$BUCKET_NAME'"
+
 
       # 3) Copia un file di esempio nel percorso dati_raw per triggerare la Function
       - name: Trigger conversion function
