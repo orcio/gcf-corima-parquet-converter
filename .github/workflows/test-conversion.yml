@@ -72,11 +72,10 @@ jobs:
           gsutil cp gs://$BUCKET_NAME/${{ env.DEST_PATH }} ./output.parquet
           python3 - <<EOF
 
-
-import pandas as pd
-df = pd.read_parquet("output.parquet")
-# Controlli di base
-assert "alias" in df.columns, "Colonna 'alias' mancante"
-assert df["Time"].dtype == "int64", "Colonna 'Time' non è int64"
-print("✅ Parquet contiene le colonne 'alias' e 'Time' in nanosecondi")
-EOF
+            import pandas as pd
+            df = pd.read_parquet("output.parquet")
+            # Controlli di base
+            assert "alias" in df.columns, "Colonna 'alias' mancante"
+            assert df["Time"].dtype == "int64", "Colonna 'Time' non è int64"
+            print("✅ Parquet contiene le colonne 'alias' e 'Time' in nanosecondi")
+            EOF
