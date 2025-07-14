@@ -1,0 +1,8 @@
+stdatalog_pnpl==1.0.0
+stdatalog_core==1.0.0
+
+# Cloud Function
+functions-framework==3.*
+google-cloud-storage
+pandas
+pyarrow
