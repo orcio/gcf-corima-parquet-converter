@@ -1,13 +1,13 @@
 name: Test Cloud Function Conversion
 
-# Puoi lanciarlo manualmente o su ogni push
+# Puoi lanciarlo manualmente o su ogni push su main
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
 
 env:
-  # Nome del tuo bucket GCS (impostalo nei Secrets o direttamente qui)
+  # Solo il nome del bucket, senza gs://
   BUCKET_NAME: ${{ secrets.GCS_BUCKET }}
 
 jobs:
@@ -15,72 +15,79 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      # 1) Checkout del codice
+      # 1) Prendi il codice
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # 2) Setup Google Cloud SDK e autenticazione
-      - name: Configure gcloud
+      # 2) Autentica gcloud (e con gsutil viene installato insieme)
+      - name: Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: ${{ secrets.GCP_PROJECT }}
           service_account_key: ${{ secrets.GCP_SA_KEY }}
           export_default_credentials: true
-    
-      - name: Debug ENV
-        run: |
-            echo "BUCKET_NAME is: '$BUCKET_NAME'"
 
+      # 3) Debug (facoltativo): controlla che BUCKET_NAME sia corretto
+      - name: Echo bucket
+        run: echo "Bucket: gs://${BUCKET_NAME}"
 
-      # 3) Copia un file di esempio nel percorso dati_raw per triggerare la Function
-      - name: Trigger conversion function
-        id: trigger
+      # 4) Copia i raw sample per triggerare la Function
+      - name: Upload test files
+        id: upload
         run: |
+          # timestamp univoco per il test
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
           TEST_PREFIX="dati_raw/test_${TIMESTAMP}"
-          # Qui il path sorgente che contiene il raw di esempio:
-          SAMPLE_PATH="dati_raw/corima-data/LAF1_20250711_16_22_17"
-          # Copia tutto (.dat + .json) nel prefix di test
-          gsutil cp gs://$BUCKET_NAME/$SAMPLE_PATH/*.dat \
-                    gs://$BUCKET_NAME/${TEST_PREFIX}/
-          gsutil cp gs://$BUCKET_NAME/$SAMPLE_PATH/*.json \
-                    gs://$BUCKET_NAME/${TEST_PREFIX}/
-          echo "TEST_PREFIX=$TEST_PREFIX" >> $GITHUB_ENV
 
+          # cartella di esempio già presente in GCS
+          SAMPLE_PREFIX="dati_raw/corima-data/LAF1_20250711_16_22_17"
 
-      # 4) Attendi che la Function elabori e scriva il Parquet nel path atteso
+          # copia .dat + .json nella nuova cartella di test
+          gsutil -m cp "gs://${BUCKET_NAME}/${SAMPLE_PREFIX}/*.dat" \
+                    "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
+          gsutil -m cp "gs://${BUCKET_NAME}/${SAMPLE_PREFIX}/*.json" \
+                    "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
+
+          # esponi il TEST_PREFIX alle step successive
+          echo "TEST_PREFIX=${TEST_PREFIX}" >> $GITHUB_ENV
+
+      # 5) Attendi che il Parquet arrivi nel path costruito da alias/YYYY/MM/DD
       - name: Wait for output Parquet
         id: wait
         run: |
-          # Estrai alias e data dal TEST_PREFIX
-          folder_name=$(basename $TEST_PREFIX)              # es. test_20250711_16...
-          # Se la cartella originale era "LAF1_20250711_16_22_17" potresti:
-          SAMPLE_FOLDER="LAF1_20250711_16_22_17"
-          alias=${SAMPLE_FOLDER%%_*}                        # -> "LAF1"
-          date_part=${SAMPLE_FOLDER#*_}                     # -> "20250711_16_22_17"
-          yyyymmdd=${date_part%%_*}                         # -> "20250711"
+          # ricava alias e data dal SAMPLE_PREFIX
+          SAMPLE_FOLDER=${SAMPLE_PREFIX##*/}       # es. "LAF1_20250711_16_22_17"
+          alias=${SAMPLE_FOLDER%%_*}               # -> "LAF1"
+          date_part=${SAMPLE_FOLDER#*_}            # -> "20250711_16_22_17"
+          yyyymmdd=${date_part%%_*}                # -> "20250711"
           dt="${yyyymmdd:0:4}/${yyyymmdd:4:2}/${yyyymmdd:6:2}"
+
           DEST_PATH="${alias}/${dt}/iis3dwb_acc.parquet"
-          echo "Looking for gs://$BUCKET_NAME/$DEST_PATH"
+          echo "DEST_PATH=${DEST_PATH}" >> $GITHUB_ENV
+
+          # loop di polling: 30 tentativi a 10s
           for i in {1..30}; do
-            if gsutil -q stat gs://$BUCKET_NAME/$DEST_PATH; then
-              echo "DEST_PATH=$DEST_PATH" >> $GITHUB_ENV
+            if gsutil -q stat "gs://${BUCKET_NAME}/${DEST_PATH}"; then
+              echo "Found gs://${BUCKET_NAME}/${DEST_PATH}"
               exit 0
             fi
             sleep 10
           done
+
+          echo "ERROR: Parquet not found after timeout"
           exit 1
 
-      # 5) Scarica e verifica contenuto del Parquet
-      - name: Validate Parquet contents
+      # 6) Scarica e verifica il Parquet
+      - name: Validate Parquet
         run: |
-          gsutil cp gs://$BUCKET_NAME/${{ env.DEST_PATH }} ./output.parquet
-          python3 - <<EOF
+          gsutil cp "gs://${BUCKET_NAME}/${DEST_PATH}" output.parquet
 
+          python3 - <<EOF
             import pandas as pd
+
             df = pd.read_parquet("output.parquet")
-            # Controlli di base
-            assert "alias" in df.columns, "Colonna 'alias' mancante"
-            assert df["Time"].dtype == "int64", "Colonna 'Time' non è int64"
-            print("✅ Parquet contiene le colonne 'alias' e 'Time' in nanosecondi")
+            # Verifiche minime
+            assert "alias" in df.columns, "Missing 'alias'"
+            assert df["Time"].dtype == "int64", "Time must be int64"
+            print("✅ Parquet OK:", df.head())
             EOF
