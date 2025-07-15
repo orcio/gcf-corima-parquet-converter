@@ -93,14 +93,14 @@ jobs:
                         "gs://${BUCKET_NAME}/${TEST_PREFIX}/"
 
       # ▸ 2. Attesa output Parquet
-      - name: Wait for Parquet
-        run: |
+      - name: Wait for Parquet  
+        run: | 
           parquet_folder = "data_parquet"
           alias="LAF1"
           dt="2025/07/11"
           DEST_DIR="${parquet_folder}/${alias}/${dt}"      # cartella dove compariranno i file
 
-          for i in {1..30}; do
+          for i in {1..60}; do
             # cerca il primo parquet che comincia con iis3dwb_acc_
             FILE=$(gsutil ls "gs://${BUCKET_NAME}/${DEST_DIR}/iis3dwb_acc_*.parquet" 2>/dev/null | head -n 1)
             if [[ -n "$FILE" ]]; then
