@@ -3,7 +3,7 @@ name: Deploy & Test Cloud Function Conversion
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ master ]
 
 # ▸ Secrets richiesti:
 #   - GCP_PROJECT       → ID del progetto GCP
