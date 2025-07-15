@@ -48,6 +48,7 @@ jobs:
             --trigger-resource ${BUCKET_NAME} \
             --memory 2048MB \
             --region ${REGION} \
+            --max-instances=6 \
             --source .               # cartella radice del repo
 
 
