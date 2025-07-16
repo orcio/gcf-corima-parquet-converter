@@ -115,7 +115,7 @@ def process_dat_to_parquet(cloud_event):
         compression="SNAPPY",
         data_page_version="2.0",
         column_encoding=enc,
-        use_dictionary=["alias", "Date"]   # lista di colonne da tenere in dizionario
+        use_dictionary=["alias"]   # lista di colonne da tenere in dizionario
     )
 
     timestamp_str = dt_start.strftime("%Y%m%d_%H%M%S")
@@ -140,10 +140,12 @@ def process_dat_to_parquet(cloud_event):
     # =============  RMS SU FINESTRE PIENE DA 1 s  ====================
     # =================================================================
 
-    # 1) bucket da 1 s basato su Time assoluto
+
+
+    # 1) bucket da 1 s basato su Time assoluto (Time è già in ns)
     df["bucket_s"] = df["Time"] // 1_000_000_000
 
-    # 2) individua i bucket completi in base alla DURATA
+    # 2) individua i bucket completi in base alla DURATA (≥ 0,999 s)
     groups = df.groupby("bucket_s")
     full_buckets = [
         b for b, g in groups
@@ -155,22 +157,30 @@ def process_dat_to_parquet(cloud_event):
 
     df_full = df[df["bucket_s"].isin(full_buckets)].copy()
 
-    # 3) magnitudine accelerazione
-    ACC_COLS = [f"{SENSOR_NAME}_x", f"{SENSOR_NAME}_y", f"{SENSOR_NAME}_z"]
-    df_full["acc_mod"] = np.sqrt((df_full[ACC_COLS]**2).sum(axis=1))
-
-    # 4) RMS per 1 s
+    # 3) RMS per asse (x, y, z)
+    ACC_COLS = ["A_x_g", "A_y_g", "A_z_g"]          # <<-- aggiorna se diverso
     rms_df = (
-        df_full.groupby("bucket_s")["acc_mod"]
-               .apply(lambda x: np.sqrt((x**2).mean()))
-               .reset_index(name="rms_g")
+        df_full
+        .groupby("bucket_s")[ACC_COLS]
+        .agg(lambda a: np.sqrt((a**2).mean()))
+        .reset_index()
+        .rename(columns={
+            "A_x_g": "rms_x",
+            "A_y_g": "rms_y",
+            "A_z_g": "rms_z",
+        })
     )
 
-    # 5) colonne extra
-    rms_df["Time"]  = rms_df["bucket_s"] * 1_000_000_000   # inizio finestra ns
-    rms_df["alias"] = alias
+    # (Facoltativo) RMS della magnitudine, utile come vibrazione complessiva
+    rms_df["rms_mod"] = np.sqrt((rms_df[["rms_x", "rms_y", "rms_z"]]**2).sum(axis=1))
 
-    # 6) Parquet RMS
+    # 4) colonne extra di contesto
+
+    rms_df["Time"]  = (rms_df["bucket_s"] * 1_000_000_000).round().astype("int64")  
+    rms_df["alias"] = alias                               
+
+
+    # 5) scrivi Parquet con delta-encoding su Time
     parquet_rms = os.path.join(local_folder, f"{SENSOR_NAME}_rms.parquet")
     pq.write_table(
         pa.Table.from_pandas(rms_df),
@@ -178,16 +188,21 @@ def process_dat_to_parquet(cloud_event):
         compression="SNAPPY",
         data_page_version="2.0",
         column_encoding={"Time": "DELTA_BINARY_PACKED"},
-        use_dictionary=["alias", "Date"],
+        use_dictionary=["alias"],
     )
 
+    # 6) upload in directory Hive-like separata
     dest_rms = (
-        f"data_parquet_rms/"
+        f"data_parquet/"
         f"alias={alias}/"
         f"year={dt_start.year:04d}/"
         f"month={dt_start.month:02d}/"
         f"day={dt_start.day:02d}/"
         f"{SENSOR_NAME}_rms_{timestamp_str}.parquet"
     )
-    bucket.blob(dest_rms).upload_from_filename(parquet_rms)
-    print(f"[OK] RMS caricato su gs://{bucket_name}/{dest_rms}")
+    
+
+    dest_blob = bucket.blob(dest_rms )
+    dest_blob.upload_from_filename(parquet_rms)
+
+    print(f"[OK] Caricato su gs://{bucket_name}/{dest_raw }")
