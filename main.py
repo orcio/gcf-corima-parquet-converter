@@ -97,7 +97,9 @@ def process_dat_to_parquet(cloud_event):
 
     # 2) arricchimento Time e alias
     start_ns = int(dt_start.timestamp() * 1_000_000_000)
-    df["Time"]  = df["Time"].astype("int64") + start_ns
+    time_rel_ns = (df["Time"].astype("float64") * 1_000_000_000).round().astype("int64")
+    df["Time"]  = time_rel_ns + start_ns                   # Time assoluto in ns
+
     df["alias"] = alias
     df["Date"]  = dt_start.date()
 
