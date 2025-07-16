@@ -121,10 +121,13 @@ def process_dat_to_parquet(cloud_event):
     # 4) path di destinazione basato su dt_start
     dest_path = (
         f"data_parquet/"
-        f"{alias}/"
-        f"{dt_start.year:04d}/{dt_start.month:02d}/{dt_start.day:02d}/"
+        f"alias={alias}/"
+        f"year={dt_start.year:04d}/"
+        f"month={dt_start.month:02d}/"
+        f"day={dt_start.day:02d}/"
         f"iis3dwb_acc_{timestamp_str}.parquet"
     )
+
 
     dest_blob = bucket.blob(dest_path)
     dest_blob.upload_from_filename(parquet_out)
