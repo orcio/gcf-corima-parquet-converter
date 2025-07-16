@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from google.cloud import storage
 import pandas as pd
 from functions_framework import cloud_event
+import numpy as np
 
 from stdatalog_core.HSD.HSDatalog import HSDatalog
 import pyarrow as pa
@@ -99,9 +100,8 @@ def process_dat_to_parquet(cloud_event):
     start_ns = int(dt_start.timestamp() * 1_000_000_000)
     time_rel_ns = (df["Time"].astype("float64") * 1_000_000_000).round().astype("int64")
     df["Time"]  = time_rel_ns + start_ns                   # Time assoluto in ns
-
     df["alias"] = alias
-    df["Date"]  = dt_start.date()
+    # df["Date"]  = dt_start.date()
 
     # 3) scrivi Parquet con delta encoding abilitato
     table = pa.Table.from_pandas(df)
@@ -121,7 +121,7 @@ def process_dat_to_parquet(cloud_event):
     timestamp_str = dt_start.strftime("%Y%m%d_%H%M%S")
 
     # 4) path di destinazione basato su dt_start
-    dest_path = (
+    dest_raw  = (
         f"data_parquet/"
         f"alias={alias}/"
         f"year={dt_start.year:04d}/"
@@ -131,7 +131,63 @@ def process_dat_to_parquet(cloud_event):
     )
 
 
-    dest_blob = bucket.blob(dest_path)
+    dest_blob = bucket.blob(dest_raw )
     dest_blob.upload_from_filename(parquet_out)
 
-    print(f"[OK] Caricato su gs://{bucket_name}/{dest_path}")
+    print(f"[OK] Caricato su gs://{bucket_name}/{dest_raw }")
+
+    # =================================================================
+    # =============  RMS SU FINESTRE PIENE DA 1 s  ====================
+    # =================================================================
+
+    # 1) bucket da 1 s basato su Time assoluto
+    df["bucket_s"] = df["Time"] // 1_000_000_000
+
+    # 2) individua i bucket completi in base alla DURATA
+    groups = df.groupby("bucket_s")
+    full_buckets = [
+        b for b, g in groups
+        if (g["Time"].max() - g["Time"].min()) >= 0.999 * 1_000_000_000
+    ]
+    if not full_buckets:
+        print("[WARN] Nessuna finestra di 1 s completa: RMS non scritto")
+        return
+
+    df_full = df[df["bucket_s"].isin(full_buckets)].copy()
+
+    # 3) magnitudine accelerazione
+    ACC_COLS = [f"{SENSOR_NAME}_x", f"{SENSOR_NAME}_y", f"{SENSOR_NAME}_z"]
+    df_full["acc_mod"] = np.sqrt((df_full[ACC_COLS]**2).sum(axis=1))
+
+    # 4) RMS per 1 s
+    rms_df = (
+        df_full.groupby("bucket_s")["acc_mod"]
+               .apply(lambda x: np.sqrt((x**2).mean()))
+               .reset_index(name="rms_g")
+    )
+
+    # 5) colonne extra
+    rms_df["Time"]  = rms_df["bucket_s"] * 1_000_000_000   # inizio finestra ns
+    rms_df["alias"] = alias
+
+    # 6) Parquet RMS
+    parquet_rms = os.path.join(local_folder, f"{SENSOR_NAME}_rms.parquet")
+    pq.write_table(
+        pa.Table.from_pandas(rms_df),
+        parquet_rms,
+        compression="SNAPPY",
+        data_page_version="2.0",
+        column_encoding={"Time": "DELTA_BINARY_PACKED"},
+        use_dictionary=["alias", "Date"],
+    )
+
+    dest_rms = (
+        f"data_parquet_rms/"
+        f"alias={alias}/"
+        f"year={dt_start.year:04d}/"
+        f"month={dt_start.month:02d}/"
+        f"day={dt_start.day:02d}/"
+        f"{SENSOR_NAME}_rms_{timestamp_str}.parquet"
+    )
+    bucket.blob(dest_rms).upload_from_filename(parquet_rms)
+    print(f"[OK] RMS caricato su gs://{bucket_name}/{dest_rms}")
