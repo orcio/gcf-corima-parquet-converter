@@ -98,8 +98,10 @@ jobs:
         run: | 
           parquet_folder="data_parquet"
           alias="LAF1"
-          dt="2025/07/11"
-          DEST_DIR="${parquet_folder}/${alias}/${dt}"      # cartella dove compariranno i file
+          year="2025"
+          month="07"
+          day="11"
+          DEST_DIR="${parquet_folder}/alias=${alias}/year=${year}/month=${month}/day=${day}"
 
           for i in {1..60}; do
             # cerca il primo parquet che comincia con iis3dwb_acc_
