@@ -83,6 +83,18 @@ def process_dat_to_parquet(cloud_event):
     parquet_in = os.path.join(local_folder, "iis3dwb_acc.parquet")
     df = pd.read_parquet(parquet_in)
 
+    df.rename(columns=lambda col: (
+    col.replace(" ", "_")
+       .replace("[", "")
+       .replace("]", "")
+       .replace("(g)", "")
+       .replace("{g}", "")
+       .replace("/g", "")
+       .replace("°", "deg")
+       .replace(",", "_")
+    ), inplace=True)
+
+
     # 2) arricchimento Time e alias
     start_ns = int(dt_start.timestamp() * 1_000_000_000)
     df["Time"]  = df["Time"].astype("int64") + start_ns
