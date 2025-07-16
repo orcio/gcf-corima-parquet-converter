@@ -177,7 +177,9 @@ def process_dat_to_parquet(cloud_event):
     # 4) colonne extra di contesto
 
     rms_df["Time"]  = (rms_df["bucket_s"] * 1_000_000_000).round().astype("int64")  
-    rms_df["alias"] = alias                               
+    rms_df["alias"] = alias          
+    rms_df.drop(columns=["bucket_s"], inplace=True)
+                     
 
 
     # 5) scrivi Parquet con delta-encoding su Time
